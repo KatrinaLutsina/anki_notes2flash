@@ -2,30 +2,28 @@
 import json
 import re
 import requests
-from typing import List, Dict, Any, Tuple, Union
+from typing import List, Dict, Any, Tuple, Union, Optional
 from .scrape_utils import load_config
 from .logger import get_logger
 
 logger = get_logger()
 
-def extract_json_from_response(response_content: str, allow_partial: bool = False) -> List[Dict[str, Any]]:
+def extract_json_from_response(response_content: str, allow_partial: bool = False) -> Optional[List[Dict[str, Any]]]:
     """
-    Extract and parse JSON data from API response content.
-    
-    Args:
-        response_content: The response content to parse
-        allow_partial: If True, attempt to parse partial/incomplete responses by extracting complete objects
+    Extract and parse a JSON list from API response content.
+
+    Returns an empty list when the model validly returns [], and None when no
+    valid JSON list can be parsed.
     """
-    # First try to find a complete JSON array
-    json_match = re.search(r'\[\s*{[^]]*}\s*\]', response_content, re.DOTALL)
-    if json_match:
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r'\[', response_content):
         try:
-            return json.loads(json_match.group())
+            parsed, _ = decoder.raw_decode(response_content[match.start():])
         except json.JSONDecodeError:
-            logger.error("Failed to parse extracted JSON")
-            if not allow_partial:
-                return []
-    
+            continue
+        if isinstance(parsed, list):
+            return parsed
+
     # Only attempt partial parsing if explicitly allowed
     if allow_partial:
         # Try to find as many complete objects as possible
@@ -38,10 +36,10 @@ def extract_json_from_response(response_content: str, allow_partial: bool = Fals
                 return json.loads(reconstructed_json)
             except json.JSONDecodeError:
                 logger.error("Failed to parse reconstructed JSON from partial response")
-                return []
-    
+                return None
+
     logger.error("No valid JSON data found in the text")
-    return []
+    return None
 
 def get_api_key_from_config() -> str:
     """Read the OpenRouter API key from the addon's config."""
@@ -281,6 +279,7 @@ def call_openrouter_api(prompt: str, model: str, input_data: Dict[str, Any], is_
 
     last_error = None
     for attempt in range(max_retries):
+        response = None
         # Add a unique suffix to the prompt for each retry attempt
         retry_suffix = "" if attempt == 0 else (
             f"\n\nRetry attempt {attempt} at {datetime.utcnow().isoformat()} "
@@ -330,7 +329,11 @@ def call_openrouter_api(prompt: str, model: str, input_data: Dict[str, Any], is_
                 raise KeyError("Response missing 'content' key in message")
             
             # Extract and log the response content
-            response_content = result['choices'][0]['message']['content'].strip()
+            response_content = result.get('choices', [{}])[0].get('message', {}).get('content')
+            if response_content:
+                response_content = response_content.strip()
+            else:
+                raise ValueError("OpenRouter returned an empty response")
             logger.info("\nAPI Response:\n" + "-"*80 + "\n" + response_content + "\n" + "-"*80)
             
             if is_final_step:
@@ -340,7 +343,7 @@ def call_openrouter_api(prompt: str, model: str, input_data: Dict[str, Any], is_
                 parsed_result = extract_json_from_response(response_content, allow_partial)
                 
                 # Validate the parsed result
-                if not parsed_result or not isinstance(parsed_result, list):
+                if parsed_result is None or not isinstance(parsed_result, list):
                     raise ValueError("Failed to parse JSON from final step response")
                 
                 # Validate output fields if specified
@@ -355,7 +358,19 @@ def call_openrouter_api(prompt: str, model: str, input_data: Dict[str, Any], is_
         except (requests.exceptions.RequestException, KeyError, ValueError, json.JSONDecodeError) as e:
             last_error = str(e)
             logger.warning(f"Attempt {attempt + 1}/{max_retries} failed: {last_error}")
-            
+
+            if response is not None and response.status_code == 429:
+                retry_after = response.headers.get("Retry-After")
+                if retry_after:
+                    try:
+                        retry_delay = max(0, int(retry_after))
+                    except ValueError:
+                        retry_delay = 60
+                        logger.warning(f"Invalid Retry-After value: {retry_after!r}; using {retry_delay}s")
+                else:
+                    retry_delay = 60
+                    logger.info(f"Retry-After is absent. Wait for {retry_delay}s...")
+
             # If this wasn't our last attempt, wait before retrying
             if attempt < max_retries - 1:
                 logger.info(f"For attempt {attempt + 1}/{max_retries} waiting {retry_delay} seconds...")

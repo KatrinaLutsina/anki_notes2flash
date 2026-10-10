@@ -1,0 +1,41 @@
+workflow_name: "Mandarin vocabulary extraction and flashcard (w/ pinyin) creation"
+
+user_inputs: [notes_url, deckname]
+
+scrape_notes:
+  - url: "{notes_url}"
+    output: scraped_notes_output
+
+process_notes_to_cards:
+  - step: "Extract Mandarin vocabulary and create flashcards"
+    model: "openrouter/free"
+    chunk_size: 8000
+    chunk_delay_seconds: 10
+    input:
+      - scraped_notes_output
+    attach_format_reminder: True
+    output: flashcards
+    output_fields:
+      - mandarin
+      - pinyin
+      - translation
+    prompt: |
+      Extract Mandarin vocabulary, including both keywords and phrases, relevant to the content. Carefully review the input, as it may contain unnecessary text or incomplete information that should be ignored.
+      For each extracted item, generate flashcards using the following keys:
+
+      "mandarin": The Mandarin word or phrase.
+      "pinyin": The pinyin representation.
+      "translation": The translation in English.
+
+      Ensure the output is clear, concise, and strictly adheres to the JSON format, with no extra keys or deviations. Clean the input as necessary to ensure accuracy.
+
+      Input notes:
+      {scraped_notes_output}
+
+add_cards_to_anki:
+  flashcards_data: flashcards
+  deck_name: "{deckname}"
+  card_template:
+    template_name: "Notes2Flash Basic Note Type"
+    front: "{mandarin}"
+    back: "{pinyin}<br><br>{translation}"

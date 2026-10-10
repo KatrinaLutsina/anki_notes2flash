@@ -1,5 +1,6 @@
 """Main module for processing notes into flashcards."""
 import json
+import time
 from .logger import get_logger
 from typing import List, Dict, Any
 from .processing_utils import (
@@ -88,6 +89,9 @@ def process_notes_to_cards(stage_data: Dict[str, Any], stage_config: List[Dict[s
     # Get initial content key and chunk size from first step
     content_key, _ = get_content_key_from_previous_step(0, stage_config, workflow_config)
     chunk_size = int(stage_config[0].get('chunk_size', 4000))
+    chunk_delay_seconds = float(stage_config[0].get('chunk_delay_seconds', 0))
+    if chunk_delay_seconds < 0:
+        raise ValueError("chunk_delay_seconds must not be negative")
     
     # Split the initial content into chunks
     initial_content = stage_data.get(content_key)
@@ -103,7 +107,11 @@ def process_notes_to_cards(stage_data: Dict[str, Any], stage_config: List[Dict[s
     for i, chunk in enumerate(chunks, 1):
         if len(chunks) > 1:
             logger.info(f"Processing chunk {i} of {len(chunks)}")
-            
+
+        if i > 1 and chunk_delay_seconds:
+            logger.info(f"Waiting {chunk_delay_seconds:g}s before the next chunk")
+            time.sleep(chunk_delay_seconds)
+
         try:
             # Process this chunk through all steps
             chunk_results = process_chunk_through_steps(chunk, stage_config, stage_data, workflow_config)

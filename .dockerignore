@@ -1,0 +1,10 @@
+.git
+output
+*.zip
+addon/config.json
+addon/meta.json
+addon/notes2flash.log
+addon/service_account.json
+addon/tracked_docs.json
+addon/user_inputs.json
+addon/*.bak-*

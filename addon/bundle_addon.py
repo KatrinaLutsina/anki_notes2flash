@@ -3,41 +3,54 @@ import shutil
 import subprocess
 import zipfile
 
+DEFAULT_CONFIG = {
+    "openrouter_api_key": "",
+    "notion_api_key": "",
+}
+
 def bundle_addon():
-    addon_dir = "/app/addon"
+    addon_dir = os.path.dirname(os.path.abspath(__file__))
+    project_dir = os.path.dirname(addon_dir)
     libs_dir = os.path.join(addon_dir, "libs")
-    output_file = "/app/notes2flash.ankiaddon"
-    requirements_file = "/app/requirements.txt"
+    output_file = os.path.join(project_dir, "notes2flash.ankiaddon")
+    requirements_file = os.path.join(project_dir, "requirements.txt")
     installed_packages_file = os.path.join(libs_dir, "installed_packages.txt")
+    excluded_files = {
+        ".DS_Store",
+        "config.json",
+        "meta.json",
+        "notes2flash.log",
+        "service_account.json",
+        "tracked_docs.json",
+        "user_inputs.json",
+    }
 
-    # Step 1: Check if the libs directory needs updating
-    if not os.path.exists(libs_dir):
-        os.makedirs(libs_dir)
-        install_dependencies = True
-    else:
-        # Compare installed packages with the requirements file
-        try:
-            with open(requirements_file, 'r') as f:
-                required_packages = f.read().splitlines()
+    # Step 1: Check whether requirements changed since the last bundle.
+    os.makedirs(libs_dir, exist_ok=True)
+    with open(requirements_file, 'r') as requirements:
+        required_packages = [
+            line.strip()
+            for line in requirements
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
 
-            installed_packages = subprocess.check_output(
-                ["pip", "freeze", "--path", libs_dir]
-            ).decode("utf-8").splitlines()
+    try:
+        with open(installed_packages_file, 'r') as installed_packages:
+            installed_requirements = installed_packages.read().splitlines()
+    except FileNotFoundError:
+        installed_requirements = []
 
-            # Check if there's a difference between required and installed packages
-            install_dependencies = set(required_packages) != set(installed_packages)
-        except Exception as e:
-            print(f"Error checking installed packages: {e}")
-            install_dependencies = True  # Install if comparison fails
+    install_dependencies = required_packages != installed_requirements
 
     # Step 2: Install or update dependencies only if needed
     if install_dependencies:
         print("Installing or updating dependencies...")
-        subprocess.run(["pip", "install", "--target", libs_dir, "-r", requirements_file], check=True)
-        with open(installed_packages_file, 'w') as f:
-            f.write('\n'.join(subprocess.check_output(
-                ["pip", "freeze", "--path", libs_dir]
-            ).decode("utf-8").splitlines()))
+        subprocess.run(
+            ["pip", "install", "--upgrade", "--target", libs_dir, "-r", requirements_file],
+            check=True,
+        )
+        with open(installed_packages_file, 'w') as installed_packages:
+            installed_packages.write('\n'.join(required_packages) + '\n')
     else:
         print("Dependencies are already up to date. Skipping installation.")
 
@@ -56,15 +69,14 @@ def bundle_addon():
     with zipfile.ZipFile(output_file, 'w', zipfile.ZIP_DEFLATED) as zipf:
         for root, _, files in os.walk(addon_dir):
             for file in files:
-                # Exclude service_account.json from the bundle
-                if file == "service_account.json":
+                if file in excluded_files or ".bak-" in file:
                     continue
                 file_path = os.path.join(root, file)
                 arcname = os.path.relpath(file_path, addon_dir)
                 zipf.write(file_path, arcname)
 
-        # Include the empty config.json in the bundle
-        zipf.write(os.path.join(addon_dir, "config.json"), "config.json")
+        import json
+        zipf.writestr("config.json", json.dumps(DEFAULT_CONFIG, indent=4) + "\n")
 
     print(f"Addon packaged successfully as {output_file}!")
 
