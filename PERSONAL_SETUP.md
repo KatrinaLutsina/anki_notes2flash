@@ -28,14 +28,21 @@ The generated file is `output/notes2flash.ankiaddon`.
 
 The custom Mandarin workflow is included as `addon/workflow_configs/mandarin_vocab_extraction_workflow_config.yml`. Both it and the general workflow wait 10 seconds between chunks to reduce free-model rate-limit failures.
 
-## Publish a personal fork
+## Clone the personal fork
 
-Authenticate GitHub CLI on the personal account, create the fork, and push the changes from this repository:
+Clone the prepared personal repository on the new computer:
 
 ```bash
-gh auth login -h github.com
-gh repo fork Colmmm/notes2flash --remote --remote-name fork
-git push -u fork HEAD
+git clone https://github.com/KatrinaLutsina/anki_notes2flash.git
+cd anki_notes2flash
+docker compose up --build
+```
+
+To fetch future upstream changes without changing the personal `origin`:
+
+```bash
+git remote add upstream https://github.com/Colmmm/notes2flash.git
+git fetch upstream
 ```
 
 Keep `docs/LICENSE`; the upstream project is distributed under AGPL-3.0. Configure all credentials only inside Anki on the target computer.
